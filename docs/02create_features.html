@@ -11,7 +11,7 @@
 
 <meta name="author" content="Lucas Jamar" />
 
-<meta name="date" content="2020-05-28" />
+<meta name="date" content="2020-05-31" />
 
 <title>Create Features</title>
 
@@ -365,21 +365,21 @@ summary {
 
 <h1 class="title toc-ignore">Create Features</h1>
 <h4 class="author">Lucas Jamar</h4>
-<h4 class="date">2020-05-28</h4>
+<h4 class="date">2020-05-31</h4>
 
 </div>
 
 
-<p>Feature engineering is centred around the use of the <a href="https://bulbapedia.bulbagarden.net/wiki/Damage#Damage_calculation">damage calculation formula.</a> Since we are interested in the maximum damage a player can inflict on, we start by taking the weather and type influences to be equal to the maximum weather and type influence available for each player. Then, by approximating the <a href="https://pokemondb.net/pokebase/300699/what-is-the-average-power-of-all-damaging-moves">power of all moves to 80</a>, we can calculate the damage and special damage each player can inflict on the other. The damage values are then <a href="https://www.youtube.com/watch?v=OMA7hY48jG8">rounded down</a> and used to approximate how many rounds a player would need to defeat the other. The approximate number of rounds of the battle is equal to the smallest number of rounds one player would need to defeat the other. By ignoring all priority moves, we can consider that the <a href="https://gaming.stackexchange.com/questions/52075/how-do-i-know-who-attacks-first">faster player always moves first</a>. Therefore, if the winning player is also the faster one, we assume that the defeated player will have one less chance to strike. From here, we can approximate the battle result as well as the portion of ramining HP of player 1. Since our approximations correlate well with the target variable (R2 = 0.95), we redefine the target variable to be the difference between the true remaining HP of player 1 and our approximation. This, in turn, should allow our ML model to focus on the points that are difficult to explain with our approximation. Finally, we calculate some ratios to create features for our model.</p>
+<p>Since our model needs to predict the outcome of the battle against opponents it has never seen before, we select 25% of Name_2 values for the validation set. Feature engineering is centred around the use of the <a href="https://bulbapedia.bulbagarden.net/wiki/Damage#Damage_calculation">damage calculation formula.</a> Since we are interested in the maximum damage a player can inflict on the other, we start by taking the weather and type influences to be equal to the maximum weather and type influence available for each player. Then, by approximating the <a href="https://pokemondb.net/pokebase/300699/what-is-the-average-power-of-all-damaging-moves">power of all moves to 80</a>, we can calculate the damage and special damage each player can inflict on the other. The damage values are then <a href="https://www.youtube.com/watch?v=OMA7hY48jG8">rounded down</a> and used to approximate how many rounds a player would need to defeat the other. The approximate number of rounds of the battle is equal to the smallest number of rounds one player would need to defeat the other. By ignoring all priority moves, we can consider that the <a href="https://gaming.stackexchange.com/questions/52075/how-do-i-know-who-attacks-first">faster player always moves first</a>. Therefore, if the winning player is also the faster one, we assume that the defeated player will have one less chance to strike. From here, we can approximate the battle result as well as the portion of ramining HP of player 1. Since our approximations correlate well with the target variable (R2 = 0.95), we redefine the target variable to be the difference between the true remaining HP of player 1 and our approximation. This, in turn, should allow our ML model to focus on the points that are difficult to explain with our approximation. Finally, we calculate some ratios to create features for our model.</p>
 <p>Read in combined data</p>
 <pre class="r"><code>library(data.table)
 
 dt &lt;- data.table::fread(&quot;data/03_primary/pokemon.csv&quot;)</code></pre>
-<p>Use 25% of training data for validation.</p>
-<pre class="r"><code>train_length &lt;- dt[Set == &quot;train&quot;, .N]
+<p>Use 25% of all opponent pokemons for test data.</p>
+<pre class="r"><code>all_opponents &lt;- dt[Set == &quot;train&quot;, unique(Name_2)]
 set.seed(12345)
-test_rows &lt;- sample(1:train_length, size = floor(train_length * 0.25))
-dt[test_rows, Set := &quot;test&quot;]</code></pre>
+test_opponents &lt;- sample(all_opponents, size = floor(length(all_opponents) * 0.25))
+dt[Name_2 %in% test_opponents, Set := &quot;test&quot;]</code></pre>
 <p>Create target variable &amp; battle outcome class.</p>
 <pre class="r"><code>dt[, PortionRemainingHP_1 := BattleResult / HP_1]
 dt[PortionRemainingHP_1 &lt; 0, PortionRemainingHP_1 := 0]
@@ -435,11 +435,13 @@ dt[ExpectedRounds_1_ToDefeat_2 &gt;= ExpectedRounds_2_ToDefeat_1 &amp; Speed_1 &
          ExpectedRemainingHP_2 = HP_2 - (ExpectedRounds - 1) * MaxDamage_1)]
 dt[is.na(ExpectedRemainingHP_1),
    `:=` (ExpectedRemainingHP_1 = HP_1 - ExpectedRounds * MaxDamage_2,
-         ExpectedRemainingHP_2 = HP_2 - ExpectedRounds * MaxDamage_1)]</code></pre>
+         ExpectedRemainingHP_2 = HP_2 - ExpectedRounds * MaxDamage_1)]
+dt[ExpectedRemainingHP_1 &lt; 0, ExpectedRemainingHP_1 := 0]
+dt[ExpectedRemainingHP_2 &lt; 0, ExpectedRemainingHP_2 := 0]</code></pre>
 <p>Approximate battle result is equal to remaining HP of player with highest remaining HP</p>
 <pre class="r"><code>dt[, ExpectedBattleResult := pmax(ExpectedRemainingHP_1, ExpectedRemainingHP_2)]</code></pre>
 <p>If player 2 is expected to win, ensure approximate battle result is negative</p>
-<pre class="r"><code>dt[ExpectedRemainingHP_2 &gt; ExpectedRemainingHP_1, ExpectedBattleResult := -abs(ExpectedBattleResult)]
+<pre class="r"><code>dt[ExpectedRemainingHP_2 &gt; ExpectedRemainingHP_1, ExpectedBattleResult := -ExpectedBattleResult]
 dt[, ExpectedPortionRemainingHP_1 := ExpectedBattleResult / HP_1]
 dt[ExpectedPortionRemainingHP_1 &lt; 0, ExpectedPortionRemainingHP_1 := 0]</code></pre>
 <p>Calculate diff between true and expected outcome (target variable)</p>

@@ -11,7 +11,7 @@
 
 <meta name="author" content="Lucas Jamar" />
 
-<meta name="date" content="2020-05-28" />
+<meta name="date" content="2020-06-01" />
 
 <title>Model Training</title>
 
@@ -365,12 +365,12 @@ summary {
 
 <h1 class="title toc-ignore">Model Training</h1>
 <h4 class="author">Lucas Jamar</h4>
-<h4 class="date">2020-05-28</h4>
+<h4 class="date">2020-06-01</h4>
 
 </div>
 
 
-<p>Using the optimal parameters found during our grid search, we train our final <a href="https://lightgbm.readthedocs.io/en/latest/">lightGBM</a> L2 regressor of the difference between the true and expected portion of remaining HP of player 1. We then use this model to make predictions on the combinations of submission and available pokemons data and we compute some feature importance metrics.</p>
+<p>Using the optimal parameters found during our grid search, we train our final <a href="https://lightgbm.readthedocs.io/en/latest/">lightGBM</a> L2 regressor of the difference between the true and expected portion of remaining HP of player 1. Once again, Name_2 was removed from the list of features. We then use our new model to make predictions on the combinations of submission and available pokemons data and we compute some feature importance metrics.</p>
 <p>Read in the data with features</p>
 <pre class="r"><code>library(MLmetrics)
 library(lightgbm)
@@ -389,7 +389,6 @@ train_dt &lt;- data.table::fread(&quot;data/04_features/pokemon.csv&quot;)</code
   &quot;Sp_Def_1&quot;,
   &quot;Speed_1&quot;,
   &quot;Legendary_1&quot;,
-  &quot;Name_2&quot;,
   &quot;Level_2&quot;,
   &quot;Price_2&quot;,
   &quot;HP_2&quot;,
@@ -419,8 +418,6 @@ train_dt &lt;- data.table::fread(&quot;data/04_features/pokemon.csv&quot;)</code
   &quot;ExpectedRounds&quot;,
   &quot;ExpectedRemainingHP_1&quot;,
   &quot;ExpectedRemainingHP_2&quot;,
-  &quot;ExpectedBattleResult&quot;,
-  &quot;ExpectedPortionRemainingHP_1&quot;,
   &quot;RatioLevel&quot;,
   &quot;RatioPrice&quot;,
   &quot;RatioHP&quot;,
@@ -438,7 +435,7 @@ train_dt &lt;- data.table::fread(&quot;data/04_features/pokemon.csv&quot;)</code
   &quot;RatioMaxStrength&quot;
 )</code></pre>
 <p>Separate available data from submission data</p>
-<pre class="r"><code>submission_dt &lt;- dt[Set == &quot;submission&quot;]
+<pre class="r"><code>submission_dt &lt;- train_dt[Set == &quot;submission&quot;]
 train_dt &lt;- train_dt[Set != &quot;submission&quot;]</code></pre>
 <p>Separate target from features</p>
 <pre class="r"><code>train_result &lt;- train_dt[, .(Set, BattleOutcome, PortionRemainingHP_1, ExpectedPortionRemainingHP_1, TrueMinusExpectedPortionRemainingHP_1)]
@@ -458,23 +455,24 @@ categorical_features &lt;- features[lapply(train_dt, class) == &quot;character&q
 rules &lt;- train_dt$rules
 submission_dt &lt;- lightgbm::lgb.prepare_rules(data = submission_dt, rules = rules)
 train_dt &lt;- as.matrix(train_dt$data)
-submission_dt &lt;- as.matrix(submission_dt$data)
-save(rules, file = &quot;data/05_model_input/rules.RData&quot;)</code></pre>
+submission_dt &lt;- as.matrix(submission_dt$data)</code></pre>
 <p>Transform train data to LGB dataset</p>
 <pre class="r"><code>dtrain &lt;- lightgbm::lgb.Dataset(
   label = train_result$TrueMinusExpectedPortionRemainingHP_1,
-  data = dt,
+  data = train_dt,
   categorical_feature = categorical_features,
   free_raw_data = FALSE
-)</code></pre>
+)
+
+valids &lt;- list(train = dtrain)</code></pre>
 <p>Parameters chosen from grid search</p>
 <pre class="r"><code>parameter &lt;- list(
   nthread = -1,
-  boosting = &quot;goss&quot;,
-  num_iterations = 5 * 10^3,
+  boosting = &quot;gbdt&quot;,
+  num_iterations = 2111,
   learning_rate = 0.1,
   feature_fraction = 0.95,
-  num_leaves = 80,
+  num_leaves = 30,
   seed = 12345
 )</code></pre>
 <p>Train on full available data</p>
@@ -491,28 +489,28 @@ lgb_pokemon &lt;- lightgbm::lgb.train(
 train_result[, PredictedPortionRemainingHP_1 := PredictedPortionRemainingHP_1 + ExpectedPortionRemainingHP_1]
 train_result[PredictedPortionRemainingHP_1 &lt; 0, PredictedPortionRemainingHP_1 := 0]
 train_result[PredictedPortionRemainingHP_1 &gt; 1, PredictedPortionRemainingHP_1 := 1]
-submission_result$PredictedPortionRemainingHP_1 &lt;- predict(lgb_pokemon, train_dt)
+submission_result$PredictedPortionRemainingHP_1 &lt;- predict(lgb_pokemon, submission_dt)
 submission_result[, PredictedPortionRemainingHP_1 := PredictedPortionRemainingHP_1 + ExpectedPortionRemainingHP_1]
 submission_result[PredictedPortionRemainingHP_1 &lt; 0, PredictedPortionRemainingHP_1 := 0]
 submission_result[PredictedPortionRemainingHP_1 &gt; 1, PredictedPortionRemainingHP_1 := 1]</code></pre>
 <p>Save model &amp; predictions</p>
-<pre class="r"><code>lightgbm::lgb.save(lgb_pokemon, &quot;data/06_models/lgb_pokemon.model&quot;)
+<pre class="r"><code>lightgbm::lgb.save(lgb_pokemon, &quot;data/07_model_output/lgb_pokemon.model&quot;)
 data.table::fwrite(train_result, &quot;data/07_model_output/train_prediction.csv&quot;)
 data.table::fwrite(submission_result, &quot;data/07_model_output/submission_prediction.csv&quot;)</code></pre>
 <p>Save importance matrix</p>
 <pre class="r"><code>importance_matrix &lt;- lightgbm::lgb.importance(model = lgb_pokemon)
 data.table::fwrite(importance_matrix, &quot;data/07_model_output/feature_importance.csv&quot;)</code></pre>
 <p>Calculate and print regression metrics</p>
-<pre class="r"><code>results &lt;- train_result[, .(RMSE = MLmetrics::RMSE(train_result$PredictedPortionRemainingHP_1, train_result$PortionRemainingHP_1),
-                            MAE = MLmetrics::MAE(train_result$PredictedPortionRemainingHP_1, train_result$PortionRemainingHP_1),
-                            R2 = MLmetrics::R2_Score(train_result$PredictedPortionRemainingHP_1, train_result$PortionRemainingHP_1),
+<pre class="r"><code>results &lt;- train_result[, .(RMSE = MLmetrics::RMSE(PredictedPortionRemainingHP_1, PortionRemainingHP_1),
+                            MAE = MLmetrics::MAE(PredictedPortionRemainingHP_1, PortionRemainingHP_1),
+                            R2 = MLmetrics::R2_Score(PredictedPortionRemainingHP_1, PortionRemainingHP_1),
                             compute_time = Sys.time() - compute_time)]
 print(results)</code></pre>
 <p>Calculate and print regression metrics per class of BattleOutcome</p>
-<pre class="r"><code>results &lt;- train_result[, .(RMSE = MLmetrics::RMSE(train_result$PredictedPortionRemainingHP_1, train_result$PortionRemainingHP_1),
-                            MAE = MLmetrics::MAE(train_result$PredictedPortionRemainingHP_1, train_result$PortionRemainingHP_1),
-                            R2 = MLmetrics::R2_Score(train_result$PredictedPortionRemainingHP_1, train_result$PortionRemainingHP_1),
-                            by = BattleOutcome)]
+<pre class="r"><code>results &lt;- train_result[, .(RMSE = MLmetrics::RMSE(PredictedPortionRemainingHP_1, PortionRemainingHP_1),
+                            MAE = MLmetrics::MAE(PredictedPortionRemainingHP_1, PortionRemainingHP_1),
+                            R2 = MLmetrics::R2_Score(PredictedPortionRemainingHP_1, PortionRemainingHP_1)),
+                            by = BattleOutcome]
 print(results)</code></pre>
 
 

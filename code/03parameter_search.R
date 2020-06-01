@@ -2,17 +2,19 @@
 #' title: "Grid Search Parameter Optimization"
 #' author: "Lucas Jamar"
 #' ---
-#' Using a [lightGBM model](https://lightgbm.readthedocs.io/en/latest/), a 6-fold cross-validation, and various
+#' Using a [lightGBM model](https://lightgbm.readthedocs.io/en/latest/), a grouped 6-fold cross-validation, and various
 #' model parameters, we train multiple L2 regression models of the difference between the true and expected portion of
-#' remaining HP 1. The performance of the models with different parameters is evaluated based on the RMSE, MAE and R2
-#' of the test and training data predictions. The results of each model are appended to a CSV. This CSV is later used to determine
-#' the optimal parameters for training the model on the entire data.
+#' remaining HP 1. Like with our validation set, we use Name_2 to group each opponent into the same fold.
+#' Afterwards, Name_2 is removed from the list of features. The performance of the models with different parameters
+#' is evaluated based on the RMSE, MAE and R2 of the validation predictions. The results of each model are appended to a CSV.
+#' This CSV is later used to determine the optimal parameters for training the model on the entire data.
 
 #+ setup, include=FALSE
 knitr::opts_chunk$set(eval = FALSE)
 
 #' Read in the data with features
 library(MLmetrics)
+library(caret)
 library(lightgbm)
 library(data.table)
 
@@ -30,7 +32,6 @@ feature_columns <- c(
   "Sp_Def_1",
   "Speed_1",
   "Legendary_1",
-  "Name_2",
   "Level_2",
   "Price_2",
   "HP_2",
@@ -85,6 +86,16 @@ train_dt <- train_dt[Set =="train"]
 test_result <- test_dt[, .(Set, PortionRemainingHP_1, ExpectedPortionRemainingHP_1, TrueMinusExpectedPortionRemainingHP_1)]
 train_result <- train_dt[, .(Set, PortionRemainingHP_1, ExpectedPortionRemainingHP_1, TrueMinusExpectedPortionRemainingHP_1)]
 
+#' Create grouped K-Fold indices around opponent Name.
+#' Caret provides the indices of train data per
+#' fold but we need the indices of validation data per fold.
+set.seed(12345)
+grouped_folds = caret::groupKFold(group = train_dt$Name_2, k = 6)
+indices = 1:nrow(train_dt)
+for(fold in 1:length(grouped_folds)) {
+  grouped_folds[[fold]] = indices[!indices %in% grouped_folds[[fold]]]
+}
+
 #' Keep only features for model training
 keep_columns <- function(df, columns) {
   columns <- colnames(df)[!colnames(df) %in% columns]
@@ -92,7 +103,6 @@ keep_columns <- function(df, columns) {
 }
 keep_columns(train_dt, feature_columns)
 keep_columns(test_dt, feature_columns)
-keep_columns(submission_dt, feature_columns)
 
 #' Determine which features are categorical
 features <- colnames(train_dt)
@@ -125,11 +135,11 @@ valids <- list(train = dtrain, test = dtest)
 #' Create grid of parameters to explore
 parameters <- list(
   nthread = -1,
-  boosting = c("goss"),
-  num_iterations = 5 * 10^3,
+  boosting = c("gbdt"),
+  num_iterations = 3 * 10^4,
   learning_rate = c(0.1),
   feature_fraction = c(0.95),
-  num_leaves = c(80),
+  num_leaves = c(30),
   seed = 12345
 )
 parameters <- data.table::data.table(expand.grid(parameters))
@@ -144,7 +154,7 @@ for (row in 1:nrow(parameters)) {
   lgb_pokemon <- lgb.cv(
     data = dtrain,
     objective = "regression",
-    nfold = 6,
+    folds = grouped_folds,
     params = parameter,
     early_stopping_rounds = 20,
     metric = "rmse",

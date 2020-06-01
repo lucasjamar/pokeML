@@ -11,7 +11,7 @@
 
 <meta name="author" content="Lucas Jamar" />
 
-<meta name="date" content="2020-05-28" />
+<meta name="date" content="2020-05-31" />
 
 <title>Grid Search Parameter Optimization</title>
 
@@ -365,14 +365,15 @@ summary {
 
 <h1 class="title toc-ignore">Grid Search Parameter Optimization</h1>
 <h4 class="author">Lucas Jamar</h4>
-<h4 class="date">2020-05-28</h4>
+<h4 class="date">2020-05-31</h4>
 
 </div>
 
 
-<p>Using a <a href="https://lightgbm.readthedocs.io/en/latest/">lightGBM model</a> and a 6-fold cross-validation, we test different parameters to determine the performance of the model on the test and training dataset. The results of each training round is appended to a CSV. This CSV is later used to determine the optimal parameters for training the model on all the available data.</p>
+<p>Using a <a href="https://lightgbm.readthedocs.io/en/latest/">lightGBM model</a>, a grouped 6-fold cross-validation, and various model parameters, we train multiple L2 regression models of the difference between the true and expected portion of remaining HP 1. Like with our validation set, we use Name_2 to group each opponent into the same fold. Afterwards, Name_2 is removed from the list of features. The performance of the models with different parameters is evaluated based on the RMSE, MAE and R2 of the validation predictions. The results of each model are appended to a CSV. This CSV is later used to determine the optimal parameters for training the model on the entire data.</p>
 <p>Read in the data with features</p>
 <pre class="r"><code>library(MLmetrics)
+library(caret)
 library(lightgbm)
 library(data.table)
 
@@ -389,7 +390,6 @@ train_dt &lt;- data.table::fread(&quot;data/04_features/pokemon.csv&quot;)</code
   &quot;Sp_Def_1&quot;,
   &quot;Speed_1&quot;,
   &quot;Legendary_1&quot;,
-  &quot;Name_2&quot;,
   &quot;Level_2&quot;,
   &quot;Price_2&quot;,
   &quot;HP_2&quot;,
@@ -435,20 +435,26 @@ train_dt &lt;- data.table::fread(&quot;data/04_features/pokemon.csv&quot;)</code
   &quot;RatioExpectedRemainingHP&quot;,
   &quot;RatioMaxStrength&quot;
 )</code></pre>
-<p>Separte train, test and submission data</p>
+<p>Separate train from test data</p>
 <pre class="r"><code>test_dt &lt;- train_dt[Set ==&quot;test&quot;]
 train_dt &lt;- train_dt[Set ==&quot;train&quot;]</code></pre>
 <p>Separate target from features</p>
 <pre class="r"><code>test_result &lt;- test_dt[, .(Set, PortionRemainingHP_1, ExpectedPortionRemainingHP_1, TrueMinusExpectedPortionRemainingHP_1)]
 train_result &lt;- train_dt[, .(Set, PortionRemainingHP_1, ExpectedPortionRemainingHP_1, TrueMinusExpectedPortionRemainingHP_1)]</code></pre>
+<p>Create grouped K-Fold indices around opponent Name. Caret provides the indices of train data per fold but we need the indices of validation data per fold.</p>
+<pre class="r"><code>set.seed(12345)
+grouped_folds = caret::groupKFold(group = train_dt$Name_2, k = 6)
+indices = 1:nrow(train_dt)
+for(fold in 1:length(grouped_folds)) {
+  grouped_folds[[fold]] = indices[!indices %in% grouped_folds[[fold]]]
+}</code></pre>
 <p>Keep only features for model training</p>
 <pre class="r"><code>keep_columns &lt;- function(df, columns) {
   columns &lt;- colnames(df)[!colnames(df) %in% columns]
   df[, (columns) := NULL]
 }
 keep_columns(train_dt, feature_columns)
-keep_columns(test_dt, feature_columns)
-keep_columns(submission_dt, feature_columns)</code></pre>
+keep_columns(test_dt, feature_columns)</code></pre>
 <p>Determine which features are categorical</p>
 <pre class="r"><code>features &lt;- colnames(train_dt)
 categorical_features &lt;- features[lapply(train_dt, class) == &quot;character&quot;]</code></pre>
@@ -478,10 +484,10 @@ valids &lt;- list(train = dtrain, test = dtest)</code></pre>
 <pre class="r"><code>parameters &lt;- list(
   nthread = -1,
   boosting = c(&quot;goss&quot;),
-  num_iterations = 5 * 10^3,
+  num_iterations = 3 * 10^4,
   learning_rate = c(0.1),
   feature_fraction = c(0.95),
-  num_leaves = c(80),
+  num_leaves = c(30),
   seed = 12345
 )
 parameters &lt;- data.table::data.table(expand.grid(parameters))
@@ -495,7 +501,7 @@ results &lt;- data.table::copy(parameters)</code></pre>
   lgb_pokemon &lt;- lgb.cv(
     data = dtrain,
     objective = &quot;regression&quot;,
-    nfold = 6,
+    folds = grouped_folds,
     params = parameter,
     early_stopping_rounds = 20,
     metric = &quot;rmse&quot;,

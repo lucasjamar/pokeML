@@ -1,7 +1,7 @@
 library(data.table)
 library(ggplot2)
 
-dt <- data.table::fread("data/06_models/feature_importance.csv")
+dt <- data.table::fread("data/07_model_output/feature_importance.csv")
 
 # Plot information gain
 plt <- ggplot2::ggplot(dt) +

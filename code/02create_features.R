@@ -2,9 +2,10 @@
 #' title: "Create Features"
 #' author: "Lucas Jamar"
 #' ---
-#' Feature engineering is centred around the use of the
+#' Since our model needs to predict the outcome of the battle against opponents it has never seen
+#' before, we select 25% of Name_2 values for the validation set. Feature engineering is centred around the use of the
 #' [damage calculation formula.](https://bulbapedia.bulbagarden.net/wiki/Damage#Damage_calculation)
-#' Since we are interested in the maximum damage a player can inflict on, we start by taking the weather
+#' Since we are interested in the maximum damage a player can inflict on the other, we start by taking the weather
 #' and type influences to be equal to the maximum weather and type influence available for each player.
 #' Then, by approximating the [power of all moves to 80](https://pokemondb.net/pokebase/300699/what-is-the-average-power-of-all-damaging-moves),
 #' we can calculate the damage and special damage each player can inflict on the other.
@@ -28,11 +29,11 @@ library(data.table)
 
 dt <- data.table::fread("data/03_primary/pokemon.csv")
 
-#' Use 25% of training data for validation.
-train_length <- dt[Set == "train", .N]
+#' Use 25% of all opponent pokemons for test data.
+all_opponents <- dt[Set == "train", unique(Name_2)]
 set.seed(12345)
-test_rows <- sample(1:train_length, size = floor(train_length * 0.25))
-dt[test_rows, Set := "test"]
+test_opponents <- sample(all_opponents, size = floor(length(all_opponents) * 0.25))
+dt[Name_2 %in% test_opponents, Set := "test"]
 
 #' Create target variable & battle outcome class.
 dt[, PortionRemainingHP_1 := BattleResult / HP_1]
@@ -103,12 +104,14 @@ dt[ExpectedRounds_1_ToDefeat_2 >= ExpectedRounds_2_ToDefeat_1 & Speed_1 < Speed_
 dt[is.na(ExpectedRemainingHP_1),
    `:=` (ExpectedRemainingHP_1 = HP_1 - ExpectedRounds * MaxDamage_2,
          ExpectedRemainingHP_2 = HP_2 - ExpectedRounds * MaxDamage_1)]
+dt[ExpectedRemainingHP_1 < 0, ExpectedRemainingHP_1 := 0]
+dt[ExpectedRemainingHP_2 < 0, ExpectedRemainingHP_2 := 0]
 
 #' Approximate battle result is equal to remaining HP of player with highest remaining HP
 dt[, ExpectedBattleResult := pmax(ExpectedRemainingHP_1, ExpectedRemainingHP_2)]
 
 #' If player 2 is expected to win, ensure approximate battle result is negative
-dt[ExpectedRemainingHP_2 > ExpectedRemainingHP_1, ExpectedBattleResult := -abs(ExpectedBattleResult)]
+dt[ExpectedRemainingHP_2 > ExpectedRemainingHP_1, ExpectedBattleResult := -ExpectedBattleResult]
 dt[, ExpectedPortionRemainingHP_1 := ExpectedBattleResult / HP_1]
 dt[ExpectedPortionRemainingHP_1 < 0, ExpectedPortionRemainingHP_1 := 0]
 

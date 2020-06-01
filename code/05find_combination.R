@@ -28,7 +28,7 @@ column_names <- colnames(column_names)
 
 #' Combine submission data and submission predictions.
 dt <- data.table::fread("data/04_features/pokemon.csv", skip = skip_rows, col.names = column_names)
-predictions <- data.table::fread("data/06_models/submission_prediction.csv", select = "PredictedPortionRemainingHP_1")
+predictions <- data.table::fread("data/07_model_output/submission_prediction.csv", select = "PredictedPortionRemainingHP_1")
 dt <- cbind(dt, predictions)
 rm(predictions)
 
@@ -141,4 +141,4 @@ dt <- dt[SelectedPokemonID == ID]
 #' Merge onto submission data and write submission to CSV
 submission <- data.table::fread("data/01_raw/Submission.csv")
 submission[dt, on = .(Name_2 = Name_2), SelectedPokemonID := ID]
-data.table::fwrite(dt,"data/07_model_output/Submission.csv")
+data.table::fwrite(submission, "data/07_model_output/Submission.csv")
