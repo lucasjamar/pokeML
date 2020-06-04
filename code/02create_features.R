@@ -50,7 +50,7 @@ dt[, MaxStrength_2 := pmax(Strength_2a_1a, Strength_2a_1b, Strength_2b_1a, Stren
 dt[Type_1b != "", Type_1 := paste(Type_1a, Type_1b, sep = " - ")]
 dt[Type_2b != "", Type_2 := paste(Type_2a, Type_2b, sep = " - ")]
 dt[Type_1b == "", Type_1 := Type_1a]
-dt[Type_2b == "", Type_2 := Type_1a]
+dt[Type_2b == "", Type_2 := Type_2a]
 
 #' Normally, the weather has no influence.
 dt[, WeatherInfluence_1 := 1]
